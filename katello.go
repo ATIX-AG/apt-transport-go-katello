@@ -116,9 +116,9 @@ func (p *pkgAcquireMethod) Run() int {
 
 		if msg["_number"] == "600" {
 			km := NewKatelloMethod()
-			err := km.Fetch(msg)
+			err := km.fetch(msg)
 			if err != nil {
-				km.Fail(err.Error())
+				km.fail(err.Error())
 			}
 		} else {
 			return 100
@@ -148,7 +148,7 @@ func NewKatelloMethod() *katelloMethod {
 }
 
 // Fail handles failures
-func (k *katelloMethod) Fail(message string) {
+func (k *katelloMethod) fail(message string) {
 	k.uriFailure(map[string]string{"URI": k.uri, "Message": message})
 }
 
@@ -211,7 +211,7 @@ func getRhsmProxyConfig() (string, error) {
 }
 
 // Fetch fetches a file from a remote server
-func (k *katelloMethod) Fetch(msg map[string]string) error {
+func (k *katelloMethod) fetch(msg map[string]string) error {
 	k.uri = msg["URI"]
 	k.url, _ = k.parseURI(msg["URI"])
 	k.filename = msg["Filename"]

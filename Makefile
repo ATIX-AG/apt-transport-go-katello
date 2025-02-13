@@ -4,6 +4,12 @@ APP_NAME = katello
 # Go source files
 SRC = katello.go
 
+GOPATH ?= $(shell go env GOPATH)
+ifeq ($(GOPATH),)
+    GOPATH := /tmp/go
+endif
+export GOPATH
+
 # Install dependencies
 deps:
 	go mod tidy
