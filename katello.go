@@ -327,7 +327,7 @@ func main() {
 		os.Exit(0)
 	}()
 
-	fmt.Println("100 Capabilities\nVersion: 1.0\nSingle-Instance: true\n")
+  fmt.Println("100 Capabilities\nVersion: 1.0\nSingle-Instance: true\n") //nolint:govet
 
 	// Run the main method
 	method := NewKatelloMethod()
