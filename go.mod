@@ -1,6 +1,6 @@
 module katello
 
-go 1.18
+go 1.15
 
 require gopkg.in/ini.v1 v1.67.0
 
