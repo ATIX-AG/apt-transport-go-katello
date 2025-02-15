@@ -1,8 +1,12 @@
 # Go application name
 APP_NAME = katello
+DESTDIR ?= /
 
 # Go source files
 SRC = katello.go
+
+# Default target when running `make` without arguments
+default: build
 
 GOPATH ?= $(shell go env GOPATH)
 ifeq ($(GOPATH),)
@@ -12,12 +16,21 @@ export GOPATH
 
 # Install dependencies
 deps:
+	@echo "Fetching dependencies..."
 	go mod tidy
-	go get gopkg.in/ini.v1
 
 # Build the Go application
 build: deps
-	go build -o $(APP_NAME) $(SRC)
+	@echo "Building application..."
+	go build -o $(APP_NAME) .
+
+# Install the application
+install: build
+	@echo "Installing $(APP_NAME) to $(DESTDIR)/usr/lib/apt/methods/"
+	install -d $(DESTDIR)/usr/lib/apt/methods/
+	install -m 755 $(APP_NAME) $(DESTDIR)/usr/lib/apt/methods/
+
+.PHONY: deps build install
 
 # Run the application
 run: build
@@ -39,6 +52,7 @@ lint:
 help:
 	@echo "Makefile Commands:"
 	@echo "  make build    - Compile the Go application"
+	@echo "  make install  - Install the Go application"
 	@echo "  make run      - Build and run the application"
 	@echo "  make clean    - Remove the compiled binary"
 	@echo "  make fmt      - Format the Go source code"
