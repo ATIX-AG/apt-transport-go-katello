@@ -1,6 +1,7 @@
 # Go application name
 APP_NAME = katello
 DESTDIR ?= /
+VERSION := 0.1.0
 
 # Go source files
 SRC = katello.go
