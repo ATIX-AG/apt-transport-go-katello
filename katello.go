@@ -173,8 +173,8 @@ func (k *katelloMethod) parseURI(uri string) (string, error) {
 }
 
 // getRhsmProxyConfig reads /etc/rhsm/rhsm.conf and extracts proxy settings using regex
-func getRhsmProxyConfig() (string, error) {
-	file, err := os.Open("/etc/rhsm/rhsm.conf")
+func getRhsmProxyConfig(configfile string) (string, error) {
+	file, err := os.Open(configfile)
 	if err != nil {
 		return "", fmt.Errorf("failed to read rhsm.conf: %v", err)
 	}
@@ -285,7 +285,7 @@ func (k *katelloMethod) fetch(msg map[string]string) error {
 	}
 
 	// Get RHSM proxy configuration
-	proxyURL, err := getRhsmProxyConfig()
+	proxyURL, err := getRhsmProxyConfig("/etc/rhsm/rhsm.conf")
 	if err != nil {
 		return fmt.Errorf("failed to get RHSM proxy config: %v", err)
 	}
@@ -373,7 +373,10 @@ func main() {
 		os.Exit(0)
 	}()
 
-  fmt.Println("100 Capabilities\nVersion: 1.0\nSingle-Instance: true\n") //nolint:govet
+  output := "100 Capabilities\n" +
+            "Version: 1.0\n" +
+            "Single-Instance: true\n"
+  fmt.Println(output)
 
 	// Run the main method
 	method := NewKatelloMethod()
