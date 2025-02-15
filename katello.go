@@ -9,6 +9,7 @@ import (
 	"encoding/hex"
 	"fmt"
 	"io"
+	"io/ioutil"
 	"net/http"
 	"net/url"
 	"os"
@@ -210,6 +211,15 @@ func getRhsmProxyConfig() (string, error) {
 	return proxyURL.String(), nil
 }
 
+// ReadFile function that works in both Go 1.15 and later versions
+func ReadFile(filename string) ([]byte, error) {
+  // FIXME: use the os.ReadFile if everything is on Go 1.16+
+	// return os.ReadFile(filename)
+
+	// Go 1.15 and earlier (fallback to ioutil.ReadFile)
+	return ioutil.ReadFile(filename)
+}
+
 // Fetch fetches a file from a remote server
 func (k *katelloMethod) fetch(msg map[string]string) error {
 	k.uri = msg["URI"]
@@ -217,7 +227,7 @@ func (k *katelloMethod) fetch(msg map[string]string) error {
 	k.filename = msg["Filename"]
 
 	// Load CA certificate
-	caCert, err := os.ReadFile(k.sslCACert)
+	caCert, err := ReadFile(k.sslCACert)
 	if err != nil {
 		return fmt.Errorf("failed to read CA certificate: %v", err)
 	}
