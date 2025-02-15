@@ -17,8 +17,6 @@ import (
 	"regexp"
 	"strings"
 	"syscall"
-
-	"gopkg.in/ini.v1"
 )
 
 // pkgAcquireMethod provides a base structure similar to the Python class
@@ -174,34 +172,72 @@ func (k *katelloMethod) parseURI(uri string) (string, error) {
 	return protocol + match[3], nil
 }
 
-// Reads RHSM proxy configuration from `/etc/rhsm/rhsm.conf`
+// getRhsmProxyConfig reads /etc/rhsm/rhsm.conf and extracts proxy settings using regex
 func getRhsmProxyConfig() (string, error) {
-	cfg, err := ini.Load("/etc/rhsm/rhsm.conf")
+	file, err := os.Open("/etc/rhsm/rhsm.conf")
 	if err != nil {
 		return "", fmt.Errorf("failed to read rhsm.conf: %v", err)
 	}
+	defer file.Close()
 
-	serverSection := cfg.Section("server")
-	proxyHostname := serverSection.Key("proxy_hostname").String()
-	if proxyHostname == "" {
+	// Define regex patterns to match proxy settings
+	regexPatterns := map[string]*regexp.Regexp{
+		"proxy_hostname": regexp.MustCompile(`^\s*proxy_hostname\s*=\s*(.+)\s*$`),
+		"proxy_scheme":   regexp.MustCompile(`^\s*proxy_scheme\s*=\s*(.+)\s*$`),
+		"proxy_port":     regexp.MustCompile(`^\s*proxy_port\s*=\s*(\d+)\s*$`),
+		"proxy_user":     regexp.MustCompile(`^\s*proxy_user\s*=\s*(.+)\s*$`),
+		"proxy_password": regexp.MustCompile(`^\s*proxy_password\s*=\s*(.+)\s*$`),
+	}
+
+	// Store extracted values
+	config := map[string]string{}
+
+	// Read file line by line
+	scanner := bufio.NewScanner(file)
+	for scanner.Scan() {
+		line := strings.TrimSpace(scanner.Text())
+		if line == "" || strings.HasPrefix(line, "#") || strings.HasPrefix(line, ";") {
+			continue // Skip empty lines and comments
+		}
+
+		// Check for matching patterns
+		for key, pattern := range regexPatterns {
+			if matches := pattern.FindStringSubmatch(line); len(matches) > 1 {
+				config[key] = matches[1]
+			}
+		}
+	}
+
+	// Handle scanner errors
+	if err := scanner.Err(); err != nil {
+		return "", fmt.Errorf("error reading rhsm.conf: %v", err)
+	}
+
+	// Ensure proxy_hostname is set (otherwise, no proxy)
+	proxyHostname, exists := config["proxy_hostname"]
+	if !exists || proxyHostname == "" {
 		return "", nil // No proxy configured
 	}
 
+	// Construct proxy URL
 	proxyURL := &url.URL{
-		Scheme: "http",
+		Scheme: "http", // Default scheme
 		Host:   proxyHostname,
 	}
 
-	if proxyScheme := serverSection.Key("proxy_scheme").String(); proxyScheme != "" {
+	// Override scheme if found
+	if proxyScheme, ok := config["proxy_scheme"]; ok {
 		proxyURL.Scheme = proxyScheme
 	}
 
-	if proxyPort := serverSection.Key("proxy_port").String(); proxyPort != "" {
+	// Append port if available
+	if proxyPort, ok := config["proxy_port"]; ok {
 		proxyURL.Host = fmt.Sprintf("%s:%s", proxyHostname, proxyPort)
 	}
 
-	if proxyUser := serverSection.Key("proxy_user").String(); proxyUser != "" {
-		if proxyPassword := serverSection.Key("proxy_password").String(); proxyPassword != "" {
+	// Append user credentials if available
+	if proxyUser, ok := config["proxy_user"]; ok {
+		if proxyPassword, ok := config["proxy_password"]; ok {
 			proxyURL.User = url.UserPassword(proxyUser, proxyPassword)
 		} else {
 			proxyURL.User = url.User(proxyUser)
