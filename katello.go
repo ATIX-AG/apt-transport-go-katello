@@ -151,15 +151,115 @@ func (k *katelloMethod) fail(message string) {
 	k.uriFailure(map[string]string{"URI": k.uri, "Message": message})
 }
 
-// parseURI extracts entitlement and constructs the correct URL
+const (
+	katelloURIPrefix      = "katello://"
+	repoPathMetadataField = "repopath"
+)
+
+// parseKatelloUserInfo parses "<entitlement>;repopath=<encoded-repopath>".
+func parseKatelloUserInfo(userInfo string) (string, string, error) {
+	if userInfo == "" {
+		return "", "", fmt.Errorf("missing katello user info")
+	}
+	userInfoSections := strings.SplitN(userInfo, ";", 3)
+	if len(userInfoSections) != 2 {
+		return "", "", fmt.Errorf("invalid katello user info format")
+	}
+
+	entitlementID := userInfoSections[0]
+	if entitlementID == "" {
+		return "", "", fmt.Errorf("missing entitlement ID in katello user info")
+	}
+
+	repoPathAssignment := userInfoSections[1]
+	encodedRepoPath, hadPrefix := strings.CutPrefix(repoPathAssignment, repoPathMetadataField+"=")
+	if !hadPrefix {
+		return "", "", fmt.Errorf("invalid katello repo path assignment format: %q", repoPathAssignment)
+	}
+	if encodedRepoPath == "" {
+		return "", "", fmt.Errorf("no repo path provided via: %q", repoPathAssignment)
+	}
+
+	return entitlementID, encodedRepoPath, nil
+}
+
+// parseAliasSuffix validates "<fqdn>/<hash>/<repo-id>[/<suffix>]" and returns only the optional suffix.
+// in:  "repo.example/5c0118de8cb1007/Repo-Id"
+// out: ""
+// in:  "repo.example/5c0118de8cb1007/Repo-Id/dists/stable/Release"
+// out: "/dists/stable/Release"
+func parseAliasSuffix(location string) (string, error) {
+	parts := strings.SplitN(location, "/", 4)
+	if len(parts) < 3 || parts[0] == "" || parts[1] == "" || parts[2] == "" {
+		return "", fmt.Errorf("invalid uri alias path")
+	}
+
+	if len(parts) == 3 {
+		return "", nil
+	}
+	return "/" + parts[3], nil
+}
+
+// resolveAliasedLocation rebuilds the real backend path from alias location + decoded repopath.
+// in:  location="repo.example/5c0118de8cb1007/Repo-Id", repoPath="repo.example/pulp/content/ORG/prod/repo/"
+// out: "repo.example/pulp/content/ORG/prod/repo/"
+// in:  location="repo.example/5c0118de8cb1007/Repo-Id/pool/main/a/app.deb", repoPath="repo.example/pulp/content/ORG/prod/repo/"
+// out: "repo.example/pulp/content/ORG/prod/repo/pool/main/a/app.deb"
+func resolveAliasedLocation(location string, repoPath string) (string, error) {
+	if repoPath == "" {
+		return "", fmt.Errorf("empty repopath")
+	}
+
+	suffix, err := parseAliasSuffix(location)
+	if err != nil {
+		return "", err
+	}
+
+	if suffix == "" {
+		return repoPath, nil
+	}
+	return strings.TrimRight(repoPath, "/") + suffix, nil
+}
+
+// parseURI supports these formats:
+// - New:    katello://<entitlement>;repopath=<url-encoded "<fqdn>/<full-path>">@<fqdn>/<hash16>/<readable-repo-id>
+// - Legacy: katello://<entitlement>@<fqdn>/<full-path>
+// For the new format, the alias part after '@' is used only to extract the apt-requested suffix.
 func (k *katelloMethod) parseURI(uri string) (string, error) {
-	re := regexp.MustCompile(`^katello://((?P<entitlement>.*?)@)?(?P<url>.*)$`)
-	match := re.FindStringSubmatch(uri)
-	if match == nil {
+	if !strings.HasPrefix(uri, katelloURIPrefix) {
+		return "", fmt.Errorf("protocol mismatch")
+	}
+	withoutPrefix := strings.TrimPrefix(uri, katelloURIPrefix)
+	if withoutPrefix == "" {
 		return "", fmt.Errorf("protocol mismatch")
 	}
 
-	entitlement := match[2]
+	userInfoAndLocation := strings.SplitN(withoutPrefix, "@", 3)
+	if len(userInfoAndLocation) != 2 || userInfoAndLocation[0] == "" || userInfoAndLocation[1] == "" {
+		return "", fmt.Errorf("invalid katello uri format")
+	}
+	userInfo := userInfoAndLocation[0]
+	location := userInfoAndLocation[1]
+
+	entitlement := userInfo
+	if strings.Contains(userInfo, ";") {
+		var encodedRepoPath string
+		var err error
+		entitlement, encodedRepoPath, err = parseKatelloUserInfo(userInfo)
+		if err != nil {
+			return "", err
+		}
+
+		repoPath, err := url.QueryUnescape(encodedRepoPath)
+		if err != nil {
+			return "", fmt.Errorf("invalid repopath encoding: %v", err)
+		}
+		location, err = resolveAliasedLocation(location, repoPath)
+		if err != nil {
+			return "", err
+		}
+	}
+
 	k.entitlement = entitlement
 	protocol := "http://"
 	if entitlement != "" {
@@ -169,7 +269,7 @@ func (k *katelloMethod) parseURI(uri string) (string, error) {
 		k.sslKey = fmt.Sprintf("/etc/pki/entitlement/%s-key.pem", entitlement)
 	}
 
-	return protocol + match[3], nil
+	return protocol + location, nil
 }
 
 // getRhsmProxyConfig reads /etc/rhsm/rhsm.conf and extracts proxy settings using regex

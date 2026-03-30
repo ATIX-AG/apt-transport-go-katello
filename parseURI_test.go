@@ -1,44 +1,180 @@
 package main
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
+	"fmt"
+	"net/url"
+	"strings"
 	"testing"
 )
 
-// Test_parseURI tests the parseURI function.
+func shortRepoHash(location string) string {
+	sum := sha256.Sum256([]byte(location))
+	return hex.EncodeToString(sum[:])[:16]
+}
+
+func hostFromLocation(location string) string {
+	parts := strings.SplitN(location, "/", 2)
+	return parts[0]
+}
+
+func buildAliasedKatelloURI(entitlement string, location string, repoID string, hash string, suffix string) string {
+	if hash == "" {
+		hash = shortRepoHash(location)
+	}
+	uri := fmt.Sprintf(
+		"katello://%s;repopath=%s@%s/%s/%s",
+		entitlement,
+		url.QueryEscape(location),
+		hostFromLocation(location),
+		hash,
+		repoID,
+	)
+	if suffix != "" {
+		uri += "/" + suffix
+	}
+	return uri
+}
+
 func Test_parseURI(t *testing.T) {
 	tests := []struct {
-		name         string
-		inputURI     string
-		expectedURL  string
-		expectedEnt  string
+		name           string
+		inputURI       string
+		expectedURL    string
+		expectedEnt    string
 		expectedCACert string
-		expectedCert string
-		expectedKey  string
-		expectErr    bool
+		expectedCert   string
+		expectedKey    string
+		expectErr      bool
 	}{
 		{
-			name:        "Valid URI with entitlement",
-			inputURI:    "katello://12345@myserver.com/path",
-			expectedURL: "https://myserver.com/path",
-			expectedEnt: "12345",
+			name: "Valid URI with repopath metadata",
+			inputURI: buildAliasedKatelloURI(
+				"7561127256828274694",
+				"repo-host.example/pulp/content/ORG/development/Saltstack_for_Debian_and_Ubuntu_RCV/short/01dscwjc/",
+				"Example-Saltstack-for-Debian-and-Ubuntu",
+				"",
+				"dists/default/Release",
+			),
+			expectedURL:    "https://repo-host.example/pulp/content/ORG/development/Saltstack_for_Debian_and_Ubuntu_RCV/short/01dscwjc/dists/default/Release",
+			expectedEnt:    "7561127256828274694",
 			expectedCACert: "/etc/rhsm/ca/katello-server-ca.pem",
-			expectedCert: "/etc/pki/entitlement/12345.pem",
-			expectedKey: "/etc/pki/entitlement/12345-key.pem",
-			expectErr:   false,
+			expectedCert:   "/etc/pki/entitlement/7561127256828274694.pem",
+			expectedKey:    "/etc/pki/entitlement/7561127256828274694-key.pem",
+			expectErr:      false,
 		},
 		{
-			name:        "Valid URI without entitlement",
-			inputURI:    "katello://myserver.com/path",
-			expectedURL: "http://myserver.com/path",
-			expectedEnt: "",
-			expectedCACert: "",
-			expectedCert: "",
-			expectedKey: "",
-			expectErr:   false,
+			name: "Hash mismatch is accepted (no hash check)",
+			inputURI: buildAliasedKatelloURI(
+				"7561127256828274694",
+				"repo-host.example/pulp/content/ORG/development/Saltstack_for_Debian_and_Ubuntu_RCV/short/01dscwjc/",
+				"Example-Saltstack-for-Debian-and-Ubuntu",
+				"deadbeefdeadbeef",
+				"dists/default/Release",
+			),
+			expectedURL:    "https://repo-host.example/pulp/content/ORG/development/Saltstack_for_Debian_and_Ubuntu_RCV/short/01dscwjc/dists/default/Release",
+			expectedEnt:    "7561127256828274694",
+			expectedCACert: "/etc/rhsm/ca/katello-server-ca.pem",
+			expectedCert:   "/etc/pki/entitlement/7561127256828274694.pem",
+			expectedKey:    "/etc/pki/entitlement/7561127256828274694-key.pem",
+			expectErr:      false,
 		},
 		{
-			name:      "Invalid URI format",
-			inputURI:  "http://myserver.com/path",
+			name: "Repo ID segment is ignored for URL reconstruction",
+			inputURI: buildAliasedKatelloURI(
+				"7561127256828274694",
+				"repo-host.example/pulp/content/ORG/development/Saltstack_for_Debian_and_Ubuntu_RCV/short/01dscwjc/",
+				"totally-different-repo-id",
+				"",
+				"dists/default/Release",
+			),
+			expectedURL:    "https://repo-host.example/pulp/content/ORG/development/Saltstack_for_Debian_and_Ubuntu_RCV/short/01dscwjc/dists/default/Release",
+			expectedEnt:    "7561127256828274694",
+			expectedCACert: "/etc/rhsm/ca/katello-server-ca.pem",
+			expectedCert:   "/etc/pki/entitlement/7561127256828274694.pem",
+			expectedKey:    "/etc/pki/entitlement/7561127256828274694-key.pem",
+			expectErr:      false,
+		},
+		{
+			name: "No alias suffix keeps repopath unchanged",
+			inputURI: buildAliasedKatelloURI(
+				"7561127256828274694",
+				"repo-host.example/pulp/content/ORG/development/Saltstack_for_Debian_and_Ubuntu_RCV/short/01dscwjc/",
+				"Example-Saltstack-for-Debian-and-Ubuntu",
+				"",
+				"",
+			),
+			expectedURL:    "https://repo-host.example/pulp/content/ORG/development/Saltstack_for_Debian_and_Ubuntu_RCV/short/01dscwjc/",
+			expectedEnt:    "7561127256828274694",
+			expectedCACert: "/etc/rhsm/ca/katello-server-ca.pem",
+			expectedCert:   "/etc/pki/entitlement/7561127256828274694.pem",
+			expectedKey:    "/etc/pki/entitlement/7561127256828274694-key.pem",
+			expectErr:      false,
+		},
+		{
+			name:           "Valid legacy format with entitlement",
+			inputURI:       "katello://12345@myserver.com/path",
+			expectedURL:    "https://myserver.com/path",
+			expectedEnt:    "12345",
+			expectedCACert: "/etc/rhsm/ca/katello-server-ca.pem",
+			expectedCert:   "/etc/pki/entitlement/12345.pem",
+			expectedKey:    "/etc/pki/entitlement/12345-key.pem",
+			expectErr:      false,
+		},
+		{
+			name:      "Invalid URI without userinfo",
+			inputURI:  "katello://myserver.com/path",
+			expectErr: true,
+		},
+		{
+			name:      "Invalid URI with malformed repopath encoding",
+			inputURI:  "katello://12345;repopath=%ZZ@myserver.com/5c0118de8cb1007/repo-id/dists/default/Release",
+			expectErr: true,
+		},
+		{
+			name:      "Invalid URI with extra userinfo section",
+			inputURI:  "katello://12345;repopath=myserver.com%2Fpulp%2Fdeb%2Frepo;extra@myserver.com/5c0118de8cb1007/repo-id",
+			expectErr: true,
+		},
+		{
+			name:      "Invalid URI with empty metadata key",
+			inputURI:  "katello://12345;=myserver.com%2Fpulp%2Fdeb%2Frepo@myserver.com/5c0118de8cb1007/repo-id",
+			expectErr: true,
+		},
+		{
+			name:      "Invalid URI with metadata missing equals",
+			inputURI:  "katello://12345;repopath@myserver.com/5c0118de8cb1007/repo-id",
+			expectErr: true,
+		},
+		{
+			name:      "Invalid URI metadata without alias separator",
+			inputURI:  "katello://12345;repopath=myserver.com%2Fpulp%2Fdeb%2Frepo",
+			expectErr: true,
+		},
+		{
+			name:      "Invalid URI with incomplete alias path",
+			inputURI:  "katello://12345;repopath=myserver.com%2Fpulp%2Fdeb%2Frepo@myserver.com/5c0118de8cb1007",
+			expectErr: true,
+		},
+		{
+			name:      "Invalid URI with empty alias host",
+			inputURI:  "katello://12345;repopath=myserver.com%2Fpulp%2Fdeb%2Frepo@/5c0118de8cb1007/repo-id",
+			expectErr: true,
+		},
+		{
+			name:      "Unsupported metadata field is rejected",
+			inputURI:  "katello://12345;foo=bar@myserver.com/5c0118de8cb1007/repo-id",
+			expectErr: true,
+		},
+		{
+			name:      "Duplicate repopath metadata is rejected",
+			inputURI:  "katello://12345;repopath=one;repopath=two@myserver.com/5c0118de8cb1007/repo-id",
+			expectErr: true,
+		},
+		{
+			name:      "Missing entitlement is rejected",
+			inputURI:  "katello://;repopath=myserver.com%2Fpulp%2Fdeb%2Frepo@myserver.com/5c0118de8cb1007/repo-id",
 			expectErr: true,
 		},
 		{
@@ -46,43 +182,27 @@ func Test_parseURI(t *testing.T) {
 			inputURI:  "ftp://myserver.com/path",
 			expectErr: true,
 		},
-		{
-			name:      "Empty URI",
-			inputURI:  "",
-			expectErr: true,
-		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			// Create a new instance of katelloMethod
 			k := &katelloMethod{}
-
-			// Step 1: Call parseURI()
 			gotURL, err := k.parseURI(tt.inputURI)
 
-			// Step 2: Check for expected error
 			if (err != nil) != tt.expectErr {
 				t.Errorf("parseURI() error = %v, wantErr %v", err, tt.expectErr)
 				return
 			}
-
-			// Step 3: If error is expected, stop further checks
 			if tt.expectErr {
 				return
 			}
 
-			// Step 4: Validate the returned URL
 			if gotURL != tt.expectedURL {
 				t.Errorf("parseURI() got = %v, want %v", gotURL, tt.expectedURL)
 			}
-
-			// Step 5: Validate the stored entitlement
 			if k.entitlement != tt.expectedEnt {
 				t.Errorf("parseURI() entitlement = %v, want %v", k.entitlement, tt.expectedEnt)
 			}
-
-			// Step 6: Validate SSL certificate settings
 			if k.sslCACert != tt.expectedCACert {
 				t.Errorf("parseURI() sslCACert = %v, want %v", k.sslCACert, tt.expectedCACert)
 			}
@@ -95,4 +215,3 @@ func Test_parseURI(t *testing.T) {
 		})
 	}
 }
-
