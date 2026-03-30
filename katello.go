@@ -110,16 +110,20 @@ func (p *pkgAcquireMethod) Run() int {
 	for {
 		msg, err := p.getNextMsg()
 		if err != nil || msg == nil {
+			debugf("run loop end: err=%v msg_nil=%t", err, msg == nil)
 			return 0
 		}
+		debugf("run message: number=%q text=%q uri=%q file=%q", msg["_number"], msg["_text"], msg["URI"], msg["Filename"])
 
 		if msg["_number"] == "600" {
 			km := NewKatelloMethod()
 			err := km.fetch(msg)
 			if err != nil {
+				debugf("fetch failed: uri=%q err=%v", km.uri, err)
 				km.fail(err.Error())
 			}
 		} else {
+			debugf("unexpected message number: %q", msg["_number"])
 			return 100
 		}
 	}
@@ -226,6 +230,7 @@ func resolveAliasedLocation(location string, repoPath string) (string, error) {
 // - Legacy: katello://<entitlement>@<fqdn>/<full-path>
 // For the new format, the alias part after '@' is used only to extract the apt-requested suffix.
 func (k *katelloMethod) parseURI(uri string) (string, error) {
+	debugf("parseURI in: %q", uri)
 	if !strings.HasPrefix(uri, katelloURIPrefix) {
 		return "", fmt.Errorf("protocol mismatch")
 	}
@@ -254,6 +259,7 @@ func (k *katelloMethod) parseURI(uri string) (string, error) {
 		if err != nil {
 			return "", fmt.Errorf("invalid repopath encoding: %v", err)
 		}
+		debugf("parseURI decoded repopath: %q", repoPath)
 		location, err = resolveAliasedLocation(location, repoPath)
 		if err != nil {
 			return "", err
@@ -269,7 +275,9 @@ func (k *katelloMethod) parseURI(uri string) (string, error) {
 		k.sslKey = fmt.Sprintf("/etc/pki/entitlement/%s-key.pem", entitlement)
 	}
 
-	return protocol + location, nil
+	resolved := protocol + location
+	debugf("parseURI out: entitlement=%q resolved_url=%q", entitlement, resolved)
+	return resolved, nil
 }
 
 // getRhsmProxyConfig reads /etc/rhsm/rhsm.conf and extracts proxy settings using regex
@@ -321,6 +329,7 @@ func getRhsmProxyConfig(configfile string) (proxyConfig string, err error) {
 	// Ensure proxy_hostname is set (otherwise, no proxy)
 	proxyHostname, exists := config["proxy_hostname"]
 	if !exists || proxyHostname == "" {
+		debugf("proxy config: no proxy configured")
 		return "", nil // No proxy configured
 	}
 
@@ -349,7 +358,9 @@ func getRhsmProxyConfig(configfile string) (proxyConfig string, err error) {
 		}
 	}
 
-	return proxyURL.String(), nil
+	result := proxyURL.String()
+	debugf("proxy config resolved: %q", result)
+	return result, nil
 }
 
 // ReadFile function that works in both Go 1.15 and later versions
@@ -364,8 +375,12 @@ func ReadFile(filename string) ([]byte, error) {
 // Fetch fetches a file from a remote server
 func (k *katelloMethod) fetch(msg map[string]string) (err error) {
 	k.uri = msg["URI"]
-	k.url, _ = k.parseURI(msg["URI"])
+	k.url, err = k.parseURI(msg["URI"])
+	if err != nil {
+		return err
+	}
 	k.filename = msg["Filename"]
+	debugf("fetch start: uri=%q url=%q file=%q", k.uri, k.url, k.filename)
 
 	// Load CA certificate
 	caCert, err := ReadFile(k.sslCACert)
@@ -394,6 +409,7 @@ func (k *katelloMethod) fetch(msg map[string]string) (err error) {
 	if err != nil {
 		return fmt.Errorf("failed to get RHSM proxy config: %v", err)
 	}
+	debugf("fetch proxy: %q", proxyURL)
 
 	// Create HTTP transport with TLS and proxy settings
 	transport := &http.Transport{
@@ -426,6 +442,7 @@ func (k *katelloMethod) fetch(msg map[string]string) (err error) {
 	}()
 
 	k.status(map[string]string{"URI": k.uri, "Message": "Waiting for headers"})
+	debugf("fetch response: status=%d status_text=%q", resp.StatusCode, resp.Status)
 
 	if resp.StatusCode != 200 {
 		k.uriFailure(map[string]string{
@@ -459,10 +476,14 @@ func (k *katelloMethod) fetch(msg map[string]string) (err error) {
 	hashMD5 := md5.New()
 	writer := io.MultiWriter(file, hashSHA256, hashMD5)
 
-	_, err = io.Copy(writer, resp.Body)
+	written, err := io.Copy(writer, resp.Body)
 	if err != nil {
 		return err
 	}
+	debugf("fetch copied bytes: %d", written)
+
+	md5Hash := hex.EncodeToString(hashMD5.Sum(nil))
+	sha256Hash := hex.EncodeToString(hashSHA256.Sum(nil))
 
 	// Report success
 	k.uriDone(map[string]string{
@@ -470,20 +491,24 @@ func (k *katelloMethod) fetch(msg map[string]string) (err error) {
 		"Filename":      k.filename,
 		"Size":          resp.Header.Get("Content-Length"),
 		"Last-Modified": resp.Header.Get("Last-Modified"),
-		"MD5-Hash":      hex.EncodeToString(hashMD5.Sum(nil)),
-		"MD5Sum-Hash":   hex.EncodeToString(hashMD5.Sum(nil)),
-		"SHA256-Hash":   hex.EncodeToString(hashSHA256.Sum(nil)),
+		"MD5-Hash":      md5Hash,
+		"MD5Sum-Hash":   md5Hash,
+		"SHA256-Hash":   sha256Hash,
 	})
+	debugf("fetch done: md5=%s sha256=%s", md5Hash, sha256Hash)
 	return nil
 }
 
 func main() {
+	debugf("method startup")
+
 	// Handle KeyboardInterrupt
 	sigChan := make(chan os.Signal, 1)
 	signal.Notify(sigChan, os.Interrupt, syscall.SIGTERM)
 
 	go func() {
 		<-sigChan
+		debugf("interrupt received")
 		fmt.Println("\nInterrupted. Exiting...")
 		os.Exit(0)
 	}()
@@ -496,5 +521,6 @@ func main() {
 	// Run the main method
 	method := NewKatelloMethod()
 	ret := method.Run()
+	debugf("method exit code: %d", ret)
 	os.Exit(ret)
 }
