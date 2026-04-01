@@ -1,7 +1,7 @@
 package main
 
 import (
-  "fmt"
+	"fmt"
 	"os"
 	"testing"
 )
@@ -15,7 +15,9 @@ func mockStdin(input string, f func()) {
 	if _, err := w.WriteString(input); err != nil {
 		panic(fmt.Sprintf("Failed to write to pipe: %v", err))
 	}
-	w.Close()
+	if err := w.Close(); err != nil {
+		panic(fmt.Sprintf("Failed to close write pipe: %v", err))
+	}
 
 	os.Stdin = r
 	f()
@@ -24,10 +26,10 @@ func mockStdin(input string, f func()) {
 // Test_getNextMsg tests the getNextMsg function.
 func Test_getNextMsg(t *testing.T) {
 	tests := []struct {
-		name       string
-		input      string
-		expected   map[string]string
-		expectErr  bool
+		name      string
+		input     string
+		expected  map[string]string
+		expectErr bool
 	}{
 		{
 			name:  "Valid message with headers",
@@ -50,9 +52,9 @@ func Test_getNextMsg(t *testing.T) {
 			expectErr: false,
 		},
 		{
-			name:  "Empty input (EOF case)",
-			input: "",
-			expected: nil,
+			name:      "Empty input (EOF case)",
+			input:     "",
+			expected:  nil,
 			expectErr: true,
 		},
 		{
@@ -106,4 +108,3 @@ func Test_getNextMsg(t *testing.T) {
 		})
 	}
 }
-

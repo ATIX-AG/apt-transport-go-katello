@@ -11,10 +11,13 @@ func createTempRhsmConfig(content string) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	defer tmpFile.Close()
 
 	_, err = tmpFile.WriteString(content)
 	if err != nil {
+		_ = tmpFile.Close()
+		return "", err
+	}
+	if err := tmpFile.Close(); err != nil {
 		return "", err
 	}
 
@@ -78,7 +81,11 @@ func Test_getRhsmProxyConfig(t *testing.T) {
 			if err != nil {
 				t.Fatalf("Failed to create temp file: %v", err)
 			}
-			defer os.Remove(filePath) // Cleanup temp file
+			defer func() {
+				if rmErr := os.Remove(filePath); rmErr != nil && !os.IsNotExist(rmErr) {
+					t.Errorf("Failed to remove temp file %q: %v", filePath, rmErr)
+				}
+			}()
 
 			got, err := getRhsmProxyConfig(filePath)
 
@@ -92,4 +99,3 @@ func Test_getRhsmProxyConfig(t *testing.T) {
 		})
 	}
 }
-

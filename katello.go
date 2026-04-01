@@ -79,7 +79,7 @@ func dictToMsg(msg map[string]string) string {
 	var result strings.Builder
 	for key, value := range msg {
 		if value != "" {
-			result.WriteString(fmt.Sprintf("%s: %s\n", key, value))
+			fmt.Fprintf(&result, "%s: %s\n", key, value)
 		}
 	}
 	return result.String()
@@ -173,12 +173,17 @@ func (k *katelloMethod) parseURI(uri string) (string, error) {
 }
 
 // getRhsmProxyConfig reads /etc/rhsm/rhsm.conf and extracts proxy settings using regex
-func getRhsmProxyConfig(configfile string) (string, error) {
+func getRhsmProxyConfig(configfile string) (proxyConfig string, err error) {
 	file, err := os.Open(configfile)
 	if err != nil {
 		return "", fmt.Errorf("failed to read rhsm.conf: %v", err)
 	}
-	defer file.Close()
+	defer func() {
+		closeErr := file.Close()
+		if err == nil && closeErr != nil {
+			err = fmt.Errorf("failed to close rhsm.conf: %v", closeErr)
+		}
+	}()
 
 	// Define regex patterns to match proxy settings
 	regexPatterns := map[string]*regexp.Regexp{
@@ -249,7 +254,7 @@ func getRhsmProxyConfig(configfile string) (string, error) {
 
 // ReadFile function that works in both Go 1.15 and later versions
 func ReadFile(filename string) ([]byte, error) {
-  // FIXME: use the os.ReadFile if everything is on Go 1.16+
+	// FIXME: use the os.ReadFile if everything is on Go 1.16+
 	// return os.ReadFile(filename)
 
 	// Go 1.15 and earlier (fallback to ioutil.ReadFile)
@@ -257,7 +262,7 @@ func ReadFile(filename string) ([]byte, error) {
 }
 
 // Fetch fetches a file from a remote server
-func (k *katelloMethod) fetch(msg map[string]string) error {
+func (k *katelloMethod) fetch(msg map[string]string) (err error) {
 	k.uri = msg["URI"]
 	k.url, _ = k.parseURI(msg["URI"])
 	k.filename = msg["Filename"]
@@ -313,7 +318,12 @@ func (k *katelloMethod) fetch(msg map[string]string) error {
 	if err != nil {
 		return fmt.Errorf("HTTP request failed: %v", err)
 	}
-	defer resp.Body.Close()
+	defer func() {
+		closeErr := resp.Body.Close()
+		if err == nil && closeErr != nil {
+			err = fmt.Errorf("failed to close response body: %v", closeErr)
+		}
+	}()
 
 	k.status(map[string]string{"URI": k.uri, "Message": "Waiting for headers"})
 
@@ -338,7 +348,12 @@ func (k *katelloMethod) fetch(msg map[string]string) error {
 	if err != nil {
 		return err
 	}
-	defer file.Close()
+	defer func() {
+		closeErr := file.Close()
+		if err == nil && closeErr != nil {
+			err = fmt.Errorf("failed to close output file %q: %v", k.filename, closeErr)
+		}
+	}()
 
 	hashSHA256 := sha256.New()
 	hashMD5 := md5.New()
@@ -373,10 +388,10 @@ func main() {
 		os.Exit(0)
 	}()
 
-  output := "100 Capabilities\n" +
-            "Version: 1.0\n" +
-            "Single-Instance: true\n"
-  fmt.Println(output)
+	output := "100 Capabilities\n" +
+		"Version: 1.0\n" +
+		"Single-Instance: true\n"
+	fmt.Println(output)
 
 	// Run the main method
 	method := NewKatelloMethod()
