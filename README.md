@@ -32,3 +32,15 @@ It need to be in the apt method directory '/usr/lib/apt/methods/' and have the r
 sudo cp katello /usr/lib/apt/methods/
 sudo chmod 755 /usr/lib/apt/methods/katello
 ```
+
+## Manually testing the binary
+
+Start ./katello in your shell
+
+```
+600 Aquire
+200 URI Start
+URI: katello://7561127256828111111;repopath=test-host.machine%2fpulp%2fcontent%2fORG1%2fdevelopment%2fDebian%2fcustom%2fDebian_Product%2fDebian_Repo_main%2f@test-host.machine/7f82e612b1e987ec/ORG1-Debian-Debian-Repo-main/pool/main/d/a-nice-package/a-nice-package_1.0.0-0_all.deb
+Filename: a-nice-package_1.0.0-0_all.deb
+201 URI Done
+```
