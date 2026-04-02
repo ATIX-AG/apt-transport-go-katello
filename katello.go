@@ -176,10 +176,12 @@ func parseKatelloUserInfo(userInfo string) (string, string, error) {
 	}
 
 	repoPathAssignment := userInfoSections[1]
-	encodedRepoPath, hadPrefix := strings.CutPrefix(repoPathAssignment, repoPathMetadataField+"=")
-	if !hadPrefix {
+	// Keep Go 1.15 compatibility: use HasPrefix + slicing instead of strings.CutPrefix.
+	repoPathPrefix := repoPathMetadataField + "="
+	if !strings.HasPrefix(repoPathAssignment, repoPathPrefix) {
 		return "", "", fmt.Errorf("invalid katello repo path assignment format: %q", repoPathAssignment)
 	}
+	encodedRepoPath := repoPathAssignment[len(repoPathPrefix):]
 	if encodedRepoPath == "" {
 		return "", "", fmt.Errorf("no repo path provided via: %q", repoPathAssignment)
 	}

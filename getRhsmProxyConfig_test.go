@@ -1,13 +1,14 @@
 package main
 
 import (
+	"io/ioutil"
 	"os"
 	"testing"
 )
 
 // createTempRhsmConfig creates a temporary rhsm.conf file for testing.
 func createTempRhsmConfig(content string) (string, error) {
-	tmpFile, err := os.CreateTemp("", "rhsm.conf")
+	tmpFile, err := ioutil.TempFile("", "rhsm.conf")
 	if err != nil {
 		return "", err
 	}
